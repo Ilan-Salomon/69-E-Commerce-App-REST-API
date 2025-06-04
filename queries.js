@@ -182,6 +182,118 @@ const loginUser = (request, response) => {
     })
   }
 
+  // Cart functions
+
+// Get or create a cart for a logged-in user or guest (identified by sessionId)
+const getOrCreateCart = async (userId, sessionId) => {
+    try {
+      let cartResult
+      if (userId) {
+        // Check if user has an active cart
+        cartResult = await pool.query(
+          'SELECT * FROM carts WHERE user_id = $1 AND checked_out = FALSE LIMIT 1',
+          [userId]
+        )
+        if (cartResult.rows.length === 0) {
+          // Create new cart for user
+          const insertResult = await pool.query(
+            'INSERT INTO carts (user_id, checked_out) VALUES ($1, FALSE) RETURNING *',
+            [userId]
+          )
+          return insertResult.rows[0]
+        }
+      } else if (sessionId) {
+        // For guest, check if cart exists with session_id
+        cartResult = await pool.query(
+          'SELECT * FROM carts WHERE session_id = $1 AND checked_out = FALSE LIMIT 1',
+          [sessionId]
+        )
+        if (cartResult.rows.length === 0) {
+          // Create new cart for guest session
+          const insertResult = await pool.query(
+            'INSERT INTO carts (session_id, checked_out) VALUES ($1, FALSE) RETURNING *',
+            [sessionId]
+          )
+          return insertResult.rows[0]
+        }
+      } else {
+        throw new Error('No userId or sessionId provided to getOrCreateCart')
+      }
+      return cartResult.rows[0]
+    } catch (error) {
+      throw error
+    }
+  }
+  
+  // Get cart items by cart id
+  const getCartItems = async (cartId) => {
+    try {
+      const result = await pool.query(
+        `SELECT ci.id, ci.product_id, p.name, p.price, ci.quantity 
+         FROM cart_items ci 
+         JOIN products p ON ci.product_id = p.id 
+         WHERE ci.cart_id = $1`,
+        [cartId]
+      )
+      return result.rows
+    } catch (error) {
+      throw error
+    }
+  }
+  
+  // Add or update item in cart
+  const addOrUpdateCartItem = async (cartId, productId, quantity) => {
+    try {
+      // Check if item already in cart
+      const existingItem = await pool.query(
+        'SELECT * FROM cart_items WHERE cart_id = $1 AND product_id = $2',
+        [cartId, productId]
+      )
+      if (existingItem.rows.length > 0) {
+        // Update quantity
+        const updated = await pool.query(
+          'UPDATE cart_items SET quantity = $1 WHERE id = $2 RETURNING *',
+          [quantity, existingItem.rows[0].id]
+        )
+        return updated.rows[0]
+      } else {
+        // Insert new item
+        const inserted = await pool.query(
+          'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING *',
+          [cartId, productId, quantity]
+        )
+        return inserted.rows[0]
+      }
+    } catch (error) {
+      throw error
+    }
+  }
+  
+  // Remove an item from the cart by cart_item id
+  const removeCartItem = async (cartId, itemId) => {
+    try {
+      // Delete the item, returning deleted row
+      const deleted = await pool.query(
+        'DELETE FROM cart_items WHERE cart_id = $1 AND id = $2 RETURNING *',
+        [cartId, itemId]
+      )
+      return deleted.rows[0]
+    } catch (error) {
+      throw error
+    }
+  }
+  
+  // Clear all items from cart
+  const clearCartItems = async (cartId) => {
+    try {
+      await pool.query(
+        'DELETE FROM cart_items WHERE cart_id = $1',
+        [cartId]
+      )
+    } catch (error) {
+      throw error
+    }
+  }
 
   module.exports = {
     getUsers, //GET list of all your users 
@@ -193,6 +305,11 @@ const loginUser = (request, response) => {
     createProduct, //POST a new product
     createPaymentMethod, //POST a new credit card
     //createOrder// POST a new order meaning add to kart
-    loginUser //You accept user credentials (email and password) from the request body. You find the user in the DB by email. Use bcrypt to compare the password provided with the hashed password stored.If valid, generate a JWT token and send it back to the client. Client will use this token to access protected routes.
-
+    loginUser, //You accept user credentials (email and password) from the request body. You find the user in the DB by email. Use bcrypt to compare the password provided with the hashed password stored.If valid, generate a JWT token and send it back to the client. Client will use this token to access protected routes.
+  // Cart exports:
+  getOrCreateCart,
+  getCartItems,
+  addOrUpdateCartItem,
+  removeCartItem,
+  clearCartItems,
   }
